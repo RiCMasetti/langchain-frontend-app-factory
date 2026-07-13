@@ -1,0 +1,8 @@
+{
+  "template_key": "vue-vite",
+  "display_name": "Vue + Vite",
+  "default_node_version": "22",
+  "allowed_node_versions": ["18", "20", "22"],
+  "default_port": 5173,
+  "allowed_command_binaries": ["npm", "npx", "node", "vite", "vitest"]
+}

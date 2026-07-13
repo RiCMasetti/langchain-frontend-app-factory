@@ -1,0 +1,8 @@
+{
+  "template_key": "nextjs",
+  "display_name": "Next.js",
+  "default_node_version": "22",
+  "allowed_node_versions": ["18", "20", "22"],
+  "default_port": 3000,
+  "allowed_command_binaries": ["npm", "npx", "node", "next"]
+}

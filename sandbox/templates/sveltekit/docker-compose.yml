@@ -1,0 +1,13 @@
+services:
+  frontend-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /workspace/app
+    volumes:
+      - ..:/workspace
+    environment:
+      - CI=true
+    ports:
+      - "${PORT}:${PORT}"
+    command: ["sleep", "infinity"]
