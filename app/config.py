@@ -90,7 +90,7 @@ class Settings:
     checkpoint_backend: Literal["sqlite", "memory", "none"]
     langsmith_project: str = field(default="frontend-app-factory")
     app_writer_max_steps: int = 60
-    test_writer_max_steps: int = 40
+    test_writer_max_steps: int = 60
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -124,5 +124,5 @@ class Settings:
             checkpoint_backend=checkpoint_backend,  # type: ignore[arg-type]
             langsmith_project=os.getenv("LANGSMITH_PROJECT", "frontend-app-factory"),
             app_writer_max_steps=parse_positive_int("APP_WRITER_MAX_STEPS", 60),
-            test_writer_max_steps=parse_positive_int("TEST_WRITER_MAX_STEPS", 40),
+            test_writer_max_steps=parse_positive_int("TEST_WRITER_MAX_STEPS", 60),
         )

@@ -4,7 +4,7 @@ install:
 	uv sync --extra dev --extra bedrock
 
 run:
-	uv run app-factory run "$$(cat examples/sample-request.md)"
+	uv run app-factory run "$$(cat examples/complex-frontend.md)"
 
 test:
 	uv run --extra dev pytest

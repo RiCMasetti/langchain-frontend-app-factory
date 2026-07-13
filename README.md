@@ -21,7 +21,8 @@ planner -> sandbox -> app_writer -> test_writer -> test_runner -> (retry: app_wr
   per-run container. Never generates Dockerfile content itself.
 - **App Writer** -- writes the frontend app inside the sandbox's `app/` directory only,
   can run `install`/`build` (never `test`) to check its work compiles.
-- **Test Writer** -- authors test files; cannot execute anything.
+- **Test Writer** -- authors test files; can also run `test` (never `install`/`build`)
+  to catch and fix its own mistakes before handing off.
 - **Test Runner** -- deterministically runs `install -> build -> test` inside the
   sandbox and reports results; no LLM call, since there's no judgment call in running
   the commands the plan already specified.

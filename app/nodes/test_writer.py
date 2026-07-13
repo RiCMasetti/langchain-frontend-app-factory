@@ -1,4 +1,12 @@
-"""Test Writer node: authors test files for the generated app. Cannot execute anything."""
+"""Test Writer node: authors test files for the generated app.
+
+Also allowed to run the test command itself (and only that slot -- never install/
+build, those stay App Writer's job) so it can catch and fix its own mistakes (e.g. a
+query that doesn't match the actual markup) in a tight write-run-fix loop, instead of
+handing every mistake off to the full App Writer/Test Runner retry cycle. Test Runner
+still does the definitive run that the graph's retry/circuit-breaker logic acts on --
+this is a cheaper, earlier self-check, not a replacement for it.
+"""
 
 from __future__ import annotations
 
@@ -9,9 +17,11 @@ from app.agent_loop import run_tool_agent_recorded
 from app.config import Settings
 from app.nodes.feedback import compact_test_feedback
 from app.reporting import TokenUsageRecorder
+from app.sandboxing.manager import SandboxManager
 from app.state import FactoryState
 from app.tools.fs_tools import build_fs_tools
 from app.tools.patch_tools import build_patch_tools
+from app.tools.sandbox_tools import build_sandbox_tools
 from app.tools.util import select_tools
 from app.workspace import RunWorkspace
 
@@ -19,10 +29,22 @@ SYSTEM_PROMPT = """You are the Test Writer agent in a frontend app factory.
 
 Read the generated app (app_reader_tool) and app-plan.json's acceptance_criteria, then
 author test files with app_writer_tool/file_patch_tool using whatever test tooling
-matches the chosen framework (test_cmd in app-plan.json tells you which). You cannot
-execute anything -- Test Runner does that. Finish by calling file_writer_tool to write
-"handoffs/testwriter-summary.json" with keys: notes (string), test_files (list of the
-test file paths you wrote).
+matches the chosen framework (test_cmd in app-plan.json tells you which).
+
+You may call sandbox_command_tool with "test" to run the test suite yourself -- you do
+not have "install" or "build" (that's App Writer's job, already done before you run).
+Use this to catch your own mistakes early: after writing or changing test files, run
+the tests, read the failure, and fix your test if the failure is test-side (a bad
+query, a wrong assumption about the markup) before finishing. Don't loop forever --
+a couple of write-then-run cycles is normal, running "test" over and over without
+changing anything between calls is not. Test Runner will still run the definitive,
+official test pass after you hand off; this is a cheaper early check, not a
+replacement for it, so it's fine to finish even if you're not 100% certain everything
+passes -- just say so honestly in your handoff notes.
+
+Finish by calling file_writer_tool to write "handoffs/testwriter-summary.json" with
+keys: notes (string -- include whether you verified tests passing yourself), test_files
+(list of the test file paths you wrote).
 
 Do not write summary, report, or documentation markdown files -- they are not part of
 the app and nobody reads them. The one JSON handoff above is your only required
@@ -47,6 +69,16 @@ purely test-side failure modes to avoid:
   loose pattern throws "multiple elements found". Scope queries to a specific container
   (e.g. within(header) / within(footer)), use exact strings instead of loose regexes, or
   add a distinguishing test id.
+
+Before asserting on a CSS class name, check whether the component imports a
+`*.module.css`/`*.module.scss` file (CSS Modules). If it does, every class name from
+that import (e.g. `styles.selected`) is renamed/hashed at build time (e.g. to something
+like `_selected_ab12c`) -- `toHaveClass('selected')` or any assertion on the literal,
+unhashed class name will never match and is not a real bug. For CSS-Modules-scoped
+classes, assert some other way: check `element.className` against a substring/regex of
+the unhashed fragment (e.g. `expect(element.className).toMatch(/selected/)`), assert on
+a `data-testid`/`aria-*` attribute instead, or import the same `styles` object in the
+test and assert `element.classList.contains(styles.selected)`.
 """
 
 
@@ -58,7 +90,9 @@ def build_test_writer_node(
             build_fs_tools(run_ws), ["app_reader_tool", "app_writer_tool", "file_writer_tool"]
         )
         patch_tools = build_patch_tools(run_ws, app_scoped=True)
-        tools = [*fs_tools, *patch_tools]
+        manager = SandboxManager.load(run_ws)
+        sandbox_tools = build_sandbox_tools(manager, allowed_slots=frozenset({"test"}))
+        tools = [*fs_tools, *patch_tools, *sandbox_tools]
         llm = settings.worker_model.init_chat_model()
 
         app_plan = state.get("app_plan", {})

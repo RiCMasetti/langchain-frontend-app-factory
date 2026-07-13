@@ -180,6 +180,9 @@ def test_app_writer_node_writes_app_files(tmp_path: Path, monkeypatch) -> None:
 def test_test_writer_node_writes_test_files_and_summary(tmp_path: Path, monkeypatch) -> None:
     ws = RunWorkspace.for_run("run-1", workspace_root=tmp_path)
     ws.ensure_layout()
+    manager = SandboxManager(ws, get_template("react-vite"))
+    manager.prepare("npm install", "npm run build", "npm test")
+
     settings = _settings(tmp_path)
     recorder = TokenUsageRecorder(ws)
 
@@ -206,6 +209,52 @@ def test_test_writer_node_writes_test_files_and_summary(tmp_path: Path, monkeypa
     assert update["testwriter_summary"]["test_files"] == ["src/App.test.tsx"]
 
 
+def test_test_writer_node_can_run_test_but_not_install_or_build(tmp_path: Path, monkeypatch) -> None:
+    """Test Writer gets the write-run-fix self-check loop (only the "test" slot) --
+    it must not be able to reach "install"/"build", those stay App Writer's job."""
+
+    from types import SimpleNamespace
+
+    ws = RunWorkspace.for_run("run-1", workspace_root=tmp_path)
+    ws.ensure_layout()
+    manager = SandboxManager(ws, get_template("react-vite"))
+    manager.prepare("npm install", "npm run build", "npm test")
+
+    monkeypatch.setattr(
+        "app.sandboxing.manager.subprocess.run",
+        lambda *a, **kw: SimpleNamespace(returncode=0, stdout="ok", stderr=""),
+    )
+
+    settings = _settings(tmp_path)
+    recorder = TokenUsageRecorder(ws)
+
+    run_test_call = AIMessage(
+        content="",
+        tool_calls=[{"name": "sandbox_command_tool", "args": {"command_name": "test"}, "id": "c1"}],
+    )
+    install_call = AIMessage(
+        content="",
+        tool_calls=[{"name": "sandbox_command_tool", "args": {"command_name": "install"}, "id": "c2"}],
+    )
+    final_message = AIMessage(content="Verified tests pass.")
+    fake_llm = FakeChatModel([run_test_call, install_call, final_message])
+    _patch_model(monkeypatch, "worker_model", fake_llm)
+
+    node = build_test_writer_node(ws, settings, recorder)
+    state = initial_state("run-1", str(ws.root), "build a pricing page", max_agent_iterations=5)
+    node(state)
+
+    tool_messages = [m for m in fake_llm.invocations[-1] if m.type == "tool"]
+    assert len(tool_messages) == 2
+    test_result = json.loads(tool_messages[0].content)
+    install_result = json.loads(tool_messages[1].content)
+
+    assert test_result["status"] == "success"
+    assert install_result == {
+        "status": "error", "reason": "not_allowed", "requested": "install", "allowed": ["test"],
+    }
+
+
 def test_test_writer_node_receives_prior_test_runner_failures_on_retry(tmp_path: Path, monkeypatch) -> None:
     """Regression test: Test Writer used to run blind on retries -- only App Writer saw
     Test Runner's feedback, so a failure caused by the test itself (not the app) could
@@ -213,6 +262,9 @@ def test_test_writer_node_receives_prior_test_runner_failures_on_retry(tmp_path:
 
     ws = RunWorkspace.for_run("run-1", workspace_root=tmp_path)
     ws.ensure_layout()
+    manager = SandboxManager(ws, get_template("react-vite"))
+    manager.prepare("npm install", "npm run build", "npm test")
+
     settings = _settings(tmp_path)
     recorder = TokenUsageRecorder(ws)
 

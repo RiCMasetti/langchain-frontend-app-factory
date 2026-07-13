@@ -28,8 +28,8 @@ Write the frontend application described by app-plan.json using app_writer_tool 
 new files and file_patch_tool for targeted edits to existing files. Only write inside
 the app/ directory -- app_reader_tool/app_writer_tool/file_patch_tool are already
 scoped there. You may call sandbox_command_tool with "install" or "build" to check
-your work compiles, but you must never attempt to run tests -- that is the Test
-Runner's job.
+your work compiles, but you cannot run tests -- that tool is only available to Test
+Writer, later.
 
 Do not write test files (anything matching *.test.*, *.spec.*, or under a __tests__/
 directory) -- that is Test Writer's exclusive job, done in a later step. Writing tests

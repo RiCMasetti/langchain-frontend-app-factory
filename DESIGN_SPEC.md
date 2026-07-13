@@ -8,11 +8,16 @@ per-run Docker sandbox mounted into the shared run workspace.
 
 The graph has five nodes -- Planner, Sandbox Agent, App Writer, Test Writer, Test
 Runner -- plus a deterministic Finalize step. Unlike a single merged "build and verify"
-agent, Test Writer and Test Runner are separate: Test Writer authors test files and has
-no execution rights; Test Runner executes install/build/test and has no file-writing
-rights for source. Each node runs its own short-lived tool-calling loop -- there is no
-shared `messages` history across nodes, only compact JSON handoff summaries -- so token
-usage stays bounded across retries regardless of how many iterations a run takes.
+agent, Test Writer and Test Runner are still separate: Test Writer authors test files
+and Test Runner executes install/build/test with no file-writing rights for source.
+Test Writer additionally has the "test" execution slot only (never install/build) so it
+can run its own write-run-fix self-check loop before handing off -- a lighter-weight
+alternative to a full merge that keeps Test Runner's official, retry-loop-driving run
+deterministic and LLM-free, and keeps App Writer with no path to quietly "fix" a test
+that's actually testing correct behavior. Each node runs its own short-lived
+tool-calling loop -- there is no shared `messages` history across nodes, only compact
+JSON handoff summaries -- so token usage stays bounded across retries regardless of how
+many iterations a run takes.
 
 Model provider is configurable per role (`planner_model`, `worker_model`) via
 LangChain's `init_chat_model()`; this repo is routinely run against Anthropic models
@@ -64,8 +69,11 @@ planner -> sandbox -> app_writer -> test_writer -> test_runner -> (retry: app_wr
   `workspace/run/<run_id>/` (optionally further scoped to `.../app/`). `run_id` is
   never an LLM-visible tool argument -- it's bound once per run via closures, and is
   itself regex-validated before any path math happens.
-- **App Writer never touches tests; Test Writer never executes anything.** Enforced by
-  which tools each node is given, not by prompt discipline alone (see Tool Binding).
+- **App Writer never touches tests; Test Writer can only run tests, never
+  install/build.** Enforced by which tools each node is given, not by prompt
+  discipline alone (see Tool Binding) -- Test Writer's `sandbox_command_tool` is built
+  with `allowed_slots=frozenset({"test"})`, so `install`/`build` are rejected the same
+  way an unrelated tool name would be.
 - **Only one Pydantic-validated artifact.** `AppPlan` (`app/schemas.py`) is the sole
   hard schema, and only because Test Runner's framework-agnosticism depends on
   `framework`/`install_cmd`/`build_cmd`/`test_cmd` always being present. Everything
@@ -104,7 +112,7 @@ planner -> sandbox -> app_writer -> test_writer -> test_runner -> (retry: app_wr
 | Planner | `file_reader_tool`, `file_writer_tool` |
 | Sandbox Agent | `file_reader_tool`, `file_writer_tool`, `sandbox_prepare_tool` |
 | App Writer | `file_reader_tool`, `app_reader_tool`, `app_writer_tool`, `file_patch_tool`, `sandbox_command_tool` (install/build only, never test) |
-| Test Writer | `app_reader_tool`, `app_writer_tool`, `file_patch_tool` (no execution) |
+| Test Writer | `app_reader_tool`, `app_writer_tool`, `file_patch_tool`, `sandbox_command_tool` (test only, never install/build) |
 | Test Runner | `run_test_tool` (fixed install→build→test sequence), `file_writer_tool` -- deterministic, no LLM call at all: there's no judgment call in running the commands the plan already specified |
 
 ## Reporting
@@ -124,7 +132,7 @@ analysis), `reports/test-report.json`, `reports/final-report.json`,
   `max_iterations_reached` / `agent_failed` status with a populated error/test report.
 - `workspace/run/index.json` and `app-factory runs list` make past runs discoverable
   without needing to know a `run_id` in advance.
-- The full test suite (currently 108+ tests) runs without Docker or a real model API
+- The full test suite (currently 109+ tests) runs without Docker or a real model API
   call -- LLM calls are exercised via a fake chat model, sandbox execution via a faked
   `subprocess.run` -- but this does **not** substitute for the manual smoke test against
   a real model + Docker described in `README.md`.
@@ -137,6 +145,18 @@ analysis), `reports/test-report.json`, `reports/final-report.json`,
   symbol and amount in separate `<span>`s) and "multiple found" (the same text appears
   in more than one place, e.g. a brand name in both header and footer). Test Writer's
   prompt now calls out both patterns explicitly.
+- **CSS Modules + `toHaveClass()` is a recurring trap.** A component applying a class
+  via a `*.module.css` import (e.g. `styles.selected`) gets that class name hashed at
+  build time -- asserting the literal unhashed string never matches and isn't a real
+  app bug. Seen independently in two unrelated runs (one self-diagnosed it mid-run in a
+  now-removed throwaway summary doc; a later run hit the identical trap with no memory
+  of the first). Reactive per-run feedback alone didn't reliably fix it even after the
+  feedback-wiring fix above, so it's now a standing rule in Test Writer's prompt rather
+  than something left to be rediscovered every run -- **a failure pattern that recurs
+  across independent runs belongs in the prompt, not just in the retry feedback.** This
+  is also the motivating case for giving Test Writer its own `test`-only execution slot
+  (see Overview): it can now catch this class of mistake itself, immediately, instead of
+  waiting for Test Runner's official pass and a full retry cycle.
 - **Test file pileup.** Without explicit guidance, Test Writer tended to add a new,
   overlapping test file each retry iteration rather than fixing the existing one (one
   real run accumulated 18 test files across 7 iterations). Prompted to check for and
