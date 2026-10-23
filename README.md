@@ -1,16 +1,36 @@
-# langchain-frontend-app-factory
+# Multi-Agent Frontend App Factory (LangGraph)
 
 A LangGraph/LangSmith multi-agent system that plans, writes, and tests frontend
 applications inside a per-run Docker sandbox -- generalized to any frontend framework
 (not just React). A LangGraph/LangSmith port of
 [google-adk-app-factory](https://github.com/RiCMasetti/google-adk-app-factory).
 
+> **Status:** Experimental local-development project. The repository has strong
+> unit coverage for orchestration and safety boundaries, but generated code and
+> real Docker/model runs still require human review.
+
+## What This Project Demonstrates
+
+- A stateful LangGraph workflow with resumable runs and bounded correction loops.
+- Clear separation between agents that write code, agents that write tests, and
+  deterministic code that executes validation.
+- Per-run filesystem isolation, vetted Docker templates, allowlisted commands,
+  structured reports, and LangSmith trace correlation.
+- Framework selection across React/Vite, Vue/Vite, Next.js, SvelteKit, and
+  generic Node.js applications.
+
 ## Architecture
 
 Five LangGraph nodes plus a deterministic finalize step:
 
-```
-planner -> sandbox -> app_writer -> test_writer -> test_runner -> (retry: app_writer | finalize)
+```mermaid
+flowchart LR
+    P[Planner] --> S[Sandbox]
+    S --> A[App Writer]
+    A --> TW[Test Writer]
+    TW --> TR[Test Runner]
+    TR -->|accepted or halted| F[Finalize]
+    TR -->|bounded retry| A
 ```
 
 - **Planner** -- analyzes the user request, writes `plans/app-plan.json` (the one
@@ -28,6 +48,13 @@ planner -> sandbox -> app_writer -> test_writer -> test_runner -> (retry: app_wr
 
 Every agent failure halts the run and routes to `finalize`, which writes the final
 JSON report/metrics and tears down the sandbox container.
+
+## Related Implementation
+
+The original
+[Google ADK implementation](https://github.com/RiCMasetti/google-adk-app-factory)
+explores the same multi-agent generation workflow with Amazon Bedrock model roles,
+a shared workspace, and ADK orchestration.
 
 ## Reporting
 
